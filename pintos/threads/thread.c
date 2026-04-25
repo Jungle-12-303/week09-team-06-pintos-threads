@@ -59,6 +59,10 @@ static void kernel_thread (thread_func *, void *aux);
 static void idle (void *aux UNUSED);
 static struct thread *next_thread_to_run (void);
 static void init_thread (struct thread *, const char *name, int priority);
+
+static bool thread_priority_ver_alram (const struct list_elem *a,
+		const struct list_elem *b, void *aux); // 알람pririty 용 함수 선언
+
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
@@ -240,7 +244,9 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	//list_push_back (&ready_list, &t->elem); 원본
+	list_insert_ordered (&ready_list, &t->elem, thread_priority_ver_alram, NULL);
+
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -301,11 +307,15 @@ thread_yield (void) {
 
 	ASSERT (!intr_context ());
 
-	old_level = intr_disable ();
-	if (curr != idle_thread)
-		list_push_back (&ready_list, &curr->elem);
-	do_schedule (THREAD_READY);
-	intr_set_level (old_level);
+	old_level = intr_disable (); // 복구용 플래그 인터럽트는 cpu에게 일을 시킬지 말지 결정하는 상태바임 가능 상태면  하던일 멈추고 이벤트 우선 처리 느낌임
+	if (curr != idle_thread) //idle_thread는 실행할 thread가 아무도 없을 때만 도는 특수 thread
+		//list_push_back (&ready_list, &curr->elem); //다시 대기줄로  현재 thread를 ready_list 맨 뒤에 넣는다
+		{
+			list_insert_ordered (&ready_list, &curr->elem, thread_priority_ver_alram, NULL);
+		}
+		 // 알람용
+		do_schedule (THREAD_READY); // 스케쥴러에게 넘기기
+	intr_set_level (old_level); // 플래그로 복구
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
@@ -393,6 +403,15 @@ kernel_thread (thread_func *function, void *aux) {
 	function (aux);       /* Execute the thread function. */
 	thread_exit ();       /* If function() returns, kill the thread. */
 }
+
+static bool   // 비교용 함수 각각의 값 꺼내서 비교 리턴
+thread_priority_ver_alram(const struct list_elem *a,
+	const struct  list_elem *b, void *aux UNUSED)
+	{
+		const struct thread *ta = list_entry (a,struct thread, elem);
+		const struct thread *tb = list_entry (b,struct thread, elem);
+		return ta-> priority > tb->priority;
+	};
 
 
 /* Does basic initialization of T as a blocked thread named

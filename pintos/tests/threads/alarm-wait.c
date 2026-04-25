@@ -141,7 +141,7 @@ sleeper (void *t_)
   struct sleep_test *test = t->test;
   int i;
 
-  for (i = 1; i <= test->iterations; i++) 
+  for (i = 1; i <= test->iterations; i++) // 반복 획수 만큼 반복하는? (기준 대기 시간 20인 인자가 40 60... 에 일어나게 함)
     {
       int64_t sleep_until = test->start + i * t->duration;
       timer_sleep (sleep_until - timer_ticks ());
