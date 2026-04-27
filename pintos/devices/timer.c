@@ -24,10 +24,14 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+static struct list sleep_list;			// 스레드들 숙소
+
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+
+static bool wakeup_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -42,6 +46,7 @@ timer_init (void) {
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
 
+	list_init (&sleep_list);			// 스레드들 숙소 오픈
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
 
@@ -88,13 +93,21 @@ timer_elapsed (int64_t then) {
 }
 
 /* Suspends execution for approximately TICKS timer ticks. */
-void
-timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
-
+void timer_sleep (int64_t ticks)
+{
+	struct thread *curr = thread_current ();
+	enum intr_level old_level;
+	
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	if (ticks <= 0)
+	return;
+	
+	old_level = intr_disable ();
+	curr -> wakeup_tick = timer_ticks () + ticks;
+	list_insert_ordered (&sleep_list, &curr -> elem, wakeup_less, NULL);
+	thread_block ();
+ 
+	intr_set_level (old_level);
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -123,9 +136,20 @@ timer_print_stats (void) {
 
 /* Timer interrupt handler. */
 static void
-timer_interrupt (struct intr_frame *args UNUSED) {
+timer_interrupt (struct intr_frame *args UNUSED)
+{
 	ticks++;
 	thread_tick ();
+
+	while (!list_empty (&sleep_list))
+	{
+		struct thread *morning = list_entry (list_front (&sleep_list), struct thread, elem);
+		if (morning -> wakeup_tick > ticks)
+			break;
+		
+		list_pop_front (&sleep_list);
+		thread_unblock (morning);
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -183,4 +207,15 @@ real_time_sleep (int64_t num, int32_t denom) {
 		ASSERT (denom % 1000 == 0);
 		busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
+}
+
+static bool
+wakeup_less (const struct list_elem *a,
+			 const struct list_elem *b,
+			 void *aux UNUSED)
+{
+	const struct thread *ta = list_entry (a, struct thread, elem);
+	const struct thread *tb = list_entry (b, struct thread, elem);
+	
+	return ta -> wakeup_tick < tb -> wakeup_tick;
 }
