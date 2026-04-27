@@ -28,6 +28,12 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+static struct list sleep_list;
+static bool wake_tick_less (const struct list_elem *a,
+                const struct list_elem *b,
+                void *aux UNUSED);
+enum intr_level old_level;
+
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -41,8 +47,9 @@ timer_init (void) {
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
-
+	// 하드웨어 timer interrupt가 오면 timer_interrupt()가 호출
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+	list_init(&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -90,11 +97,39 @@ timer_elapsed (int64_t then) {
 /* Suspends execution for approximately TICKS timer ticks. */
 void
 timer_sleep (int64_t ticks) {
-	int64_t start = timer_ticks ();
-
 	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	if (ticks <= 0)
+		return;
+
+	// while (timer_elapsed (start) < ticks)
+	// 	thread_yield ();
+		
+	// 인터럽트 끄기
+	// 현재 thread에 wake_tick 저장
+	// sleep_list에 현재 thread 넣기
+	// 인터럽트 원래대로 복구
+	old_level = intr_disable(); //0
+	struct thread *curr = thread_current();
+	curr->wake_tick = timer_ticks() +ticks;
+	// printf("curr: %p, elem: %p, wake_tick: %lld\n",
+	// 	curr,
+	// 	&curr->elem,
+	// 	curr->wake_tick);
+	// list_push_back(&sleep_list, &curr->elem);
+	list_insert_ordered(&sleep_list, &curr->elem, wake_tick_less, NULL);
+	thread_block();
+	intr_set_level(old_level);
+}
+
+static bool
+wake_tick_less (const struct list_elem *a,
+                const struct list_elem *b,
+                void *aux UNUSED)
+{
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+
+	return ta->wake_tick < tb -> wake_tick;
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -122,9 +157,20 @@ timer_print_stats (void) {
 }
 
 /* Timer interrupt handler. */
+// tick check
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
+	while (!list_empty (&sleep_list)) {
+		struct list_elem *e = list_begin (&sleep_list);
+		struct thread *t = list_entry (e, struct thread, elem);
+
+		if (t->wake_tick > ticks)
+			break;
+
+		list_pop_front (&sleep_list);
+		thread_unblock (t);
+	}
 	thread_tick ();
 }
 
