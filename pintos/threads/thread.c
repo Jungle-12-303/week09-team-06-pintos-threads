@@ -65,6 +65,8 @@ static bool thread_priority_more( const struct list_elem *a,
 					  const struct list_elem *b,
 					  void *aux UNUSED);
 
+static bool priority_less (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
 
@@ -246,7 +248,7 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_insert_ordered (&ready_list, &t->elem, thread_priority_more, NULL);
+	list_insert_ordered (&ready_list, &t -> elem, priority_less, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
@@ -610,4 +612,27 @@ allocate_tid (void) {
 	lock_release (&tid_lock);
 
 	return tid;
+}
+
+
+static bool
+wakeup_less (const struct list_elem *a,
+			 const struct list_elem *b,
+			 void *aux UNUSED)
+{
+	const struct thread *ta = list_entry (a, struct thread, elem);
+	const struct thread *tb = list_entry (b, struct thread, elem);
+	
+	return ta -> wakeup_tick < tb -> wakeup_tick;
+}
+
+static bool
+priority_less (const struct list_elem *a,
+			   const struct list_elem *b,
+			   void *aux UNUSED)
+{
+	const struct thread *ta = list_entry (a, struct thread, elem);
+	const struct thread *tb = list_entry (b, struct thread, elem);
+
+	return ta -> priority > tb -> priority;
 }
