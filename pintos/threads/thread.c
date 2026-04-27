@@ -27,7 +27,6 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
-
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -62,6 +61,9 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+static bool thread_priority_more( const struct list_elem *a,
+					  const struct list_elem *b,
+					  void *aux UNUSED);
 
 /* Returns true if T appears to point to a valid thread. */
 #define is_thread(t) ((t) != NULL && (t)->magic == THREAD_MAGIC)
@@ -135,6 +137,7 @@ thread_start (void) {
 
 /* Called by the timer interrupt handler at each timer tick.
    Thus, this function runs in an external interrupt context. */
+// 
 void
 thread_tick (void) {
 	struct thread *t = thread_current ();
@@ -177,6 +180,7 @@ thread_print_stats (void) {
    PRIORITY, but no actual priority scheduling is implemented.
    Priority scheduling is the goal of Problem 1-3. */
 tid_t
+// thread 생성
 thread_create (const char *name, int priority,
 		thread_func *function, void *aux) {
 	struct thread *t;
@@ -216,6 +220,7 @@ thread_create (const char *name, int priority,
    This function must be called with interrupts turned off.  It
    is usually a better idea to use one of the synchronization
    primitives in synch.h. */
+   // thread_block()은 현재 thread의 status를 THREAD_BLOCKED로 바꾸고, schedule()을 호출해서 다른 thread로 switch한다.
 void
 thread_block (void) {
 	ASSERT (!intr_context ());
@@ -232,6 +237,7 @@ thread_block (void) {
    be important: if the caller had disabled interrupts itself,
    it may expect that it can atomically unblock a thread and
    update other data. */
+   // thread_unblock()은 thread의 status를 THREAD_READY로 바꾸고, ready_list에 넣는다. 그리고 schedule()을 호출해서 다른 thread로 switch한다.
 void
 thread_unblock (struct thread *t) {
 	enum intr_level old_level;
@@ -240,10 +246,23 @@ thread_unblock (struct thread *t) {
 
 	old_level = intr_disable ();
 	ASSERT (t->status == THREAD_BLOCKED);
-	list_push_back (&ready_list, &t->elem);
+	list_insert_ordered (&ready_list, &t->elem, thread_priority_more, NULL);
 	t->status = THREAD_READY;
 	intr_set_level (old_level);
 }
+
+static bool
+thread_priority_more( const struct list_elem *a,
+					  const struct list_elem *b,
+					  void *aux UNUSED)
+{
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+
+  return ta->priority > tb->priority;
+}
+
+
 
 /* Returns the name of the running thread. */
 const char *
@@ -294,6 +313,7 @@ thread_exit (void) {
 
 /* Yields the CPU.  The current thread is not put to sleep and
    may be scheduled again immediately at the scheduler's whim. */
+   // 현재 thread를 ready_list의 뒤에 넣고, 다른 thread로 switch한다.
 void
 thread_yield (void) {
 	struct thread *curr = thread_current ();
@@ -538,6 +558,9 @@ do_schedule(int status) {
 	schedule ();
 }
 
+// schedule()는 thread를 새로 선택해서 switch하는 함수입니다. 
+// schedule()이 호출되기 전에, thread의 status는 THREAD_READY나 THREAD_DYING으로 바뀌어야 합니다. 
+// schedule()이 호출된 후에는, thread의 status는 THREAD_RUNNING이 됩니다.
 static void
 schedule (void) {
 	struct thread *curr = running_thread ();
