@@ -210,6 +210,11 @@ thread_create (const char *name, int priority,
 
 	/* Add to run queue. */
 	thread_unblock (t);
+	/* 새로 만든 thread가 현재 thread보다 priority가 높으면,
+   현재 thread가 CPU를 양보해야 한다. */
+	if (thread_current ()->priority < t->priority)
+    thread_yield ();
+
 
 	return tid;
 }
@@ -321,7 +326,20 @@ thread_yield (void) {
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+	struct thread *curr = thread_current ();
+
+	curr->priority = new_priority;
+
+	if (!list_empty (&ready_list)) {
+		struct thread *front = list_entry (list_front (&ready_list),
+				struct thread, elem);
+
+		if (front->priority > curr->priority)
+			thread_yield ();
+	}
+	//thread_current ()->priority = new_priority;
+
+
 }
 
 /* Returns the current thread's priority. */
